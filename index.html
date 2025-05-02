@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Aroface - Presence Detection</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/@vladmandic/face-api/dist/face-api.min.js"></script>
+  <style>
+    body {
+      font-family: 'Inter', sans-serif;
+    }
+    #overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+    }
+  </style>
+</head>
+<body class="bg-gray-900 text-white min-h-screen flex flex-col items-center justify-center p-4">
+  <h1 class="text-4xl font-semibold mb-6">Aroface Presence Detection</h1>
+
+  <div class="relative w-full max-w-xl">
+    <video id="video" autoplay muted playsinline class="rounded-lg shadow-lg w-full"></video>
+    <canvas id="overlay" class="rounded-lg shadow-lg"></canvas>
+  </div>
+
+  <div class="mt-6 flex flex-col items-center space-y-4">
+    <button id="registerBtn" class="px-6 py-3 bg-blue-600 hover:bg-blue-700 rounded-lg text-lg font-semibold transition">
+      Register My Face
+    </button>
+    <p id="status" class="text-lg"></p>
+  </div>
+
+  <div id="content" class="mt-10 p-6 bg-green-700 rounded-lg shadow-lg max-w-xl w-full hidden">
+    <h2 class="text-2xl font-bold mb-4">Welcome, you are detected!</h2>
+    <p>This content is visible only when your face is detected by Aroface.</p>
+  </div>
+
+  <script>
+    const video = document.getElementById('video');
+    const overlay = document.getElementById('overlay');
+    const registerBtn = document.getElementById('registerBtn');
+    const status = document.getElementById('status');
+    const content = document.getElementById('content');
+    const overlayCtx = overlay.getContext('2d');
+
+    let registeredDescriptor = null;
+    let detecting = false;
+
+    async function setupCamera() {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: {} });
+        video.srcObject = stream;
+        return new Promise((resolve) => {
+          video.onloadedmetadata = () => {
+            resolve();
+          };
+        });
+      } catch (error) {
+        status.textContent = 'Error accessing webcam: ' + error.message;
+      }
+    }
+
+    async function loadModels() {
+      status.textContent = 'Loading face-api models...';
+      const MODEL_URL = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model/';
+      await faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL);
+      await faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL);
+      await faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL);
+      status.textContent = 'Models loaded. Please register your face.';
+    }
+
+    async function registerFace() {
+      status.textContent = 'Registering face, please look at the camera...';
+      const detection = await faceapi.detectSingleFace(video, new faceapi.TinyFaceDetectorOptions()).withFaceLandmarks().withFaceDescriptor();
+      if (!detection) {
+        status.textContent = 'No face detected. Please try again.';
+        return;
+      }
+      registeredDescriptor = detection.descriptor;
+      status.textContent = 'Face registered successfully! Starting detection...';
+      startDetection();
+    }
+
+    async function startDetection() {
+      if (detecting) return;
+      detecting = true;
+      overlay.width = video.videoWidth;
+      overlay.height = video.videoHeight;
+
+      const options = new faceapi.TinyFaceDetectorOptions();
+
+      async function detect() {
+        if (!detecting) return;
+        const detections = await faceapi.detectAllFaces(video, options).withFaceLandmarks().withFaceDescriptors();
+        overlayCtx.clearRect(0, 0, overlay.width, overlay.height);
+
+        let userDetected = false;
+
+        detections.forEach(detection => {
+          const box = detection.detection.box;
+          overlayCtx.strokeStyle = 'lime';
+          overlayCtx.lineWidth = 2;
+          overlayCtx.strokeRect(box.x, box.y, box.width, box.height);
+
+          if (registeredDescriptor) {
+            const distance = faceapi.euclideanDistance(detection.descriptor, registeredDescriptor);
+            if (distance < 0.5) {
+              userDetected = true;
+              overlayCtx.fillStyle = 'lime';
+              overlayCtx.font = '16px Arial';
+              overlayCtx.fillText('You', box.x, box.y - 10);
+            }
+          }
+        });
+
+        if (userDetected) {
+          content.classList.remove('hidden');
+          status.textContent = 'User detected. Welcome!';
+        } else {
+          content.classList.add('hidden');
+          status.textContent = 'User not detected.';
+        }
+
+        requestAnimationFrame(detect);
+      }
+
+      detect();
+    }
+
+    registerBtn.addEventListener('click', registerFace);
+
+    loadModels().then(setupCamera);
+  </script>
+</body>
+</html>
